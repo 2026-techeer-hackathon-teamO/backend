@@ -2,30 +2,21 @@
 
 agent가 사용자 몰래 다운로드 폴더에 디코이를 넣기 위해 호출합니다.
 agent 자신의 다운로드이므로 알림을 보내지 않습니다.
-디코이 목록이 새면 미끼가 무력화되므로 X-Agent-Key 로 보호합니다.
+
+데모 전용으로 인증이 없습니다. 실제 배포 시에는 디코이 목록이 새면 미끼가
+무력화되므로 agent 인증(공유 키 등)을 붙여야 합니다.
 """
-import hmac
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from app.config import settings
 from app.db import DecoyRepository, get_decoy_repo
 from app.models import AgentDecoy
 from app.services.decoy import decoy_file_path
 
 
-def require_agent_key(x_agent_key: str | None = Header(None)) -> None:
-    if not settings.agent_api_key:
-        raise HTTPException(status_code=503, detail="agent key not configured")
-    if not x_agent_key or not hmac.compare_digest(x_agent_key, settings.agent_api_key):
-        raise HTTPException(status_code=401, detail="invalid agent key")
-
-
-router = APIRouter(
-    prefix="/api/agent", tags=["agent"], dependencies=[Depends(require_agent_key)]
-)
+router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
 @router.get("/decoys", response_model=list[AgentDecoy])

@@ -14,7 +14,7 @@
 | AI 분석 | `POST /api/analyze` | 로그를 분석해 해킹 의심도 산정 → 의심 시 알림 |
 | 알림 | `GET /api/alerts` | 담당자용 의심 이벤트 목록 |
 | 디코이 | `POST /api/decoys` · `GET /api/decoys` · `POST /api/decoys/generate` | AI가 만든 디코이 파일 업로드 / 목록 / (파일 없이) 레코드+카나리 URL 생성 |
-| agent 전용 | `GET /api/agent/decoys` · `GET /api/agent/decoys/{id}/file` | 배치할 디코이 목록·파일 (`X-Agent-Key` 필요, 알림 없음) |
+| agent 전용 | `GET /api/agent/decoys` · `GET /api/agent/decoys/{id}/file` | 배치할 디코이 목록·파일 (알림 없음, 데모용으로 인증 없음) |
 | 카나리 비콘 | `GET /api/canary/{token_id}` | 디코이 파일이 열리면 호출됨 → opener 정보 기록 + Slack 알림 |
 
 ## 실행
@@ -62,7 +62,7 @@ agent    ── POST /api/logs {file_hash} ────────▶ 디코이
 ```
 
 - agent는 메일/USB/파일 이벤트의 `file_hash`에 **파일 내용의 SHA-256(hex)** 을 넣어야 합니다 (대소문자 무관).
-- agent 전용 API는 `.env`의 `AGENT_API_KEY`와 같은 값을 `X-Agent-Key` 헤더로 보내야 합니다. 키가 비어 있으면 503.
+- agent 전용 API는 데모용으로 **인증이 없습니다**. 누구나 디코이 목록(파일명·해시)을 볼 수 있어 실제 배포 전에는 agent 인증을 붙여야 합니다.
 - agent 쪽 연동 가이드: `../agent/DECOY_INTEGRATION.md`
 
 ```bash

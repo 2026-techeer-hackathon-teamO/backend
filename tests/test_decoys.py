@@ -6,12 +6,10 @@ import pytest
 from app.db import DecoyRepository
 from app.services import notifier
 from app.store import store
-from tests.conftest import AGENT_KEY
 
 CONTENT = "가짜 인사평가 데이터".encode()
 SHA = hashlib.sha256(CONTENT).hexdigest()
 NAME = "2026_인사평가_기밀.xlsx"
-AGENT = {"X-Agent-Key": AGENT_KEY}
 
 
 @pytest.fixture
@@ -70,27 +68,18 @@ def test_decoys_persist_across_repository_instances(client, decoy_repo):
 
 # --- agent 전용 API ---
 
-def test_agent_endpoints_require_key(client):
-    _upload(client)
+def test_agent_endpoints_need_no_auth(client):
+    decoy = _upload(client).json()
 
-    assert client.get("/api/agent/decoys").status_code == 401
-    assert client.get("/api/agent/decoys", headers={"X-Agent-Key": "wrong"}).status_code == 401
-
-
-def test_agent_endpoints_unavailable_without_configured_key(client, monkeypatch):
-    from app.config import settings
-    monkeypatch.setattr(settings, "agent_api_key", "")
-
-    resp = client.get("/api/agent/decoys", headers={"X-Agent-Key": ""})
-
-    assert resp.status_code == 503
+    assert client.get("/api/agent/decoys").status_code == 200
+    assert client.get(f"/api/agent/decoys/{decoy['id']}/file").status_code == 200
 
 
 def test_agent_lists_only_decoys_with_file(client):
     client.post("/api/decoys/generate", params={"file_name": "no_file.docx"})
     uploaded = _upload(client).json()
 
-    resp = client.get("/api/agent/decoys", headers=AGENT)
+    resp = client.get("/api/agent/decoys")
 
     assert resp.status_code == 200
     assert resp.json() == [{
@@ -105,7 +94,7 @@ def test_agent_lists_only_decoys_with_file(client):
 def test_agent_downloads_decoy_file_without_alert(client, slack):
     decoy = _upload(client).json()
 
-    resp = client.get(f"/api/agent/decoys/{decoy['id']}/file", headers=AGENT)
+    resp = client.get(f"/api/agent/decoys/{decoy['id']}/file")
 
     assert resp.status_code == 200
     assert resp.content == CONTENT
@@ -117,7 +106,7 @@ def test_agent_downloads_decoy_file_without_alert(client, slack):
 
 
 def test_agent_download_unknown_decoy_404(client):
-    assert client.get("/api/agent/decoys/nope/file", headers=AGENT).status_code == 404
+    assert client.get("/api/agent/decoys/nope/file").status_code == 404
 
 
 # --- 디코이 반출 감지: POST /api/logs 의 file_hash 매칭 ---
