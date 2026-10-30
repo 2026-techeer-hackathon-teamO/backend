@@ -10,7 +10,7 @@
 | 영역 | 엔드포인트 | 설명 |
 |---|---|---|
 | 로그 수집 | `POST /api/logs` | agent가 보낸 메일/USB/파일 이벤트 적재 |
-| 로그 조회 | `GET /api/logs` | 대시보드용 로그 목록 |
+| 로그 조회 | `GET /api/logs` · `GET /api/logs/{id}` | 대시보드용 로그 목록(필터·페이지네이션) / 단건 조회 |
 | AI 분석 | `POST /api/analyze` | 로그를 분석해 해킹 의심도 산정 → 의심 시 알림 |
 | 알림 | `GET /api/alerts` | 담당자용 의심 이벤트 목록 |
 | 디코이 | `GET /api/decoys` · `POST /api/decoys/generate` | 유사 기밀 디코이 파일 + 카나리토큰 생성/배포 |
@@ -31,8 +31,31 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## 상태 저장
 
-해커톤 스캐폴드라 현재는 **인메모리 저장소**(`app/store.py`)를 사용합니다. 추후 DB(SQLite/Postgres)로 교체하세요.
+- **로그**: SQLite 파일(`DB_PATH`, 기본 `dlp.db`)에 저장되어 재시작해도 유지됩니다 (`app/db.py`).
+- **알림 · 디코이 · 카나리 히트**: 아직 **인메모리 저장소**(`app/store.py`)입니다. 재시작 시 초기화됩니다.
+
 `analyzer`/`decoy`의 핵심 로직은 TODO 스텁으로 두었습니다 — 실제 규칙/LLM 연동 지점에 주석을 달아두었습니다.
+
+## 로그 조회 API
+
+`GET /api/logs` — 최신순. 필터에 걸린 전체 건수는 `X-Total-Count` 응답 헤더로 반환합니다.
+
+| 쿼리 | 설명 |
+|---|---|
+| `host`, `user`, `classification` | 정확히 일치 |
+| `event_type` | `file_access` · `email_send` · `usb_copy` · `blocked` |
+| `blocked` | `true` / `false` |
+| `since`, `until` | 수신 시각 범위 (ISO8601, 시간대 없으면 UTC) |
+| `limit`, `offset` | 기본 100 / 0, `limit`은 1~1000 |
+
+예: `GET /api/logs?host=PC-01&event_type=usb_copy&since=2026-10-01T00:00:00Z&limit=20&offset=20`
+
+## 테스트
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
 ## 관련 레포
 
