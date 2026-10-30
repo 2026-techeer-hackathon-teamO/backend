@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# 생성된 디코이 파일 저장소
+decoys_store/
+
+.DS_Store
+.vscode/
+.idea/
