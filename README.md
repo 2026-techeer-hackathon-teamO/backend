@@ -11,7 +11,7 @@
 |---|---|---|
 | 로그 수집 | `POST /api/logs` | agent가 보낸 메일/USB/파일 이벤트 적재. `file_hash`가 디코이와 일치하면 즉시 Slack |
 | 로그 조회 | `GET /api/logs` · `GET /api/logs/{id}` | 대시보드용 로그 목록(필터·페이지네이션) / 단건 조회 |
-| AI 분석 | `POST /api/analyze` | 로그를 분석해 해킹 의심도 산정 → 의심 시 알림 |
+| AI 분석 | `POST /api/analyze` | 로그 하나를 규칙 + 해킹 패턴 AI로 분석만 해봄 (저장·알림 없음, 시연용) |
 | 알림 | `GET /api/alerts` | 담당자용 의심 이벤트 목록 |
 | 디코이 | `POST /api/decoys` · `GET /api/decoys` · `POST /api/decoys/generate` | AI가 만든 디코이 파일 업로드 / 목록 / (파일 없이) 레코드+카나리 URL 생성 |
 | agent 전용 | `GET /api/agent/decoys` · `GET /api/agent/decoys/{id}/file` | 배치할 디코이 목록·파일 (알림 없음, 데모용으로 인증 없음) |
@@ -36,7 +36,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - **디코이**: 같은 SQLite의 `decoys` 테이블, 파일 본문은 `DECOY_STORE_DIR`(기본 `decoys_store/`)에 id 이름으로 저장.
 - **알림 · 카나리 히트**: 아직 **인메모리 저장소**(`app/store.py`)입니다. 재시작 시 초기화됩니다.
 
-`analyzer`/`decoy`의 핵심 로직은 TODO 스텁으로 두었습니다 — 실제 규칙/LLM 연동 지점에 주석을 달아두었습니다.
 
 ## 로그 조회 API
 
@@ -51,6 +50,19 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `limit`, `offset` | 기본 100 / 0, `limit`은 1~1000 |
 
 예: `GET /api/logs?host=PC-01&event_type=usb_copy&since=2026-10-01T00:00:00Z&limit=20&offset=20`
+
+## 해킹 패턴 AI 판단
+
+`POST /api/logs`로 들어온 로그는 응답 후 **백그라운드**에서 분석됩니다 (`app/services/analyzer.py`, `ai_analyzer.py`).
+
+1. 규칙 기반 스코어링 (기밀 메일/USB 반출, 같은 PC 기밀 다수 접근, 차단 이벤트)
+2. 메일·USB·차단 이벤트이거나 규칙 신호가 있으면, 같은 PC의 최근 로그(최대 30건)와 함께 **Claude(`AI_MODEL`, 기본 `claude-opus-5-5`)** 가 최종 판정
+   - 구조화 출력(JSON 스키마)으로 `suspicious` · `severity` · `score` · `reason` · `patterns`를 받음
+   - `suspicious`이고 `score ≥ 0.5`면 알림 + Slack. AI가 정상이라고 보면 규칙이 의심해도 알리지 않음
+   - 분류기 거절 시 서버 측 fallback(`fallbacks: "default"`)으로 다른 모델이 재시도
+3. `ANTHROPIC_API_KEY`가 없거나 API 오류·거절·형식 오류면 규칙 결과로 판정
+
+알림의 `analyzed_by`로 출처를 구분합니다: `rule`(규칙) · `ai`(해킹 패턴 AI) · `decoy`(디코이 해시 매칭).
 
 ## 디코이 반출 감지 흐름
 

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -54,6 +55,7 @@ class Alert(BaseModel):
     related_log_ids: list[str] = Field(default_factory=list)
     host: str | None = None
     notified: bool = False            # Slack 전송 여부
+    analyzed_by: Literal["rule", "ai", "decoy"] = "rule"  # 규칙 / 해킹 패턴 AI / 디코이 해시 매칭
 
 
 class Decoy(BaseModel):

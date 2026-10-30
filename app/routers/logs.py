@@ -1,7 +1,7 @@
-"""agent가 보낸 DLP 로그 수집 + 디코이 반출 감지 + 즉시 AI 분석."""
+"""agent가 보낸 DLP 로그 수집 + 디코이 반출 감지 + 해킹 패턴 AI 분석(백그라운드)."""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 
 from app.db import DecoyRepository, LogRepository, get_decoy_repo, get_log_repo
 from app.models import Alert, Decoy, EventType, LogIn, LogRecord, Severity
@@ -23,12 +23,30 @@ def _decoy_alert(record: LogRecord, decoy: Decoy) -> Alert:
         score=1.0,
         related_log_ids=[record.id],
         host=record.host,
+        analyzed_by="decoy",
+    )
+
+
+async def _analyze_and_alert(record: LogRecord, repo: LogRepository) -> None:
+    """최근 로그 맥락과 함께 분석 → 의심되면 알림 적재 + Slack.
+
+    AI 판단은 수 초가 걸리므로 응답 후 백그라운드에서 실행한다.
+    """
+    alert = await analyze(record, repo.recent(50))
+    if alert is None:
+        return
+    store.add_alert(alert)
+    judge = "해킹 패턴 AI 판단" if alert.analyzed_by == "ai" else "규칙 탐지"
+    alert.notified = await notify_slack(
+        f":rotating_light: 유출 의심 ({alert.severity.value}, score={alert.score}) · {judge}\n"
+        f"host={alert.host}, user={record.user}\n근거: {alert.reason}"
     )
 
 
 @router.post("", response_model=LogRecord)
 async def ingest_log(
     payload: LogIn,
+    background: BackgroundTasks,
     repo: LogRepository = Depends(get_log_repo),
     decoys: DecoyRepository = Depends(get_decoy_repo),
 ) -> LogRecord:
@@ -45,17 +63,7 @@ async def ingest_log(
         )
         return record
 
-    # 최근 로그 맥락과 함께 분석 → 의심되면 알림 적재 + Slack
-    recent = repo.recent(50)
-    alert = analyze(record, recent)
-    if alert is not None:
-        store.add_alert(alert)
-        ok = await notify_slack(
-            f":rotating_light: 유출 의심 ({alert.severity.value}, score={alert.score})\n"
-            f"host={alert.host}\n근거: {alert.reason}"
-        )
-        alert.notified = ok
-
+    background.add_task(_analyze_and_alert, record, repo)
     return record
 
 

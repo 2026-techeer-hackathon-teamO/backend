@@ -18,6 +18,17 @@ def decoy_repo(tmp_path) -> DecoyRepository:
 
 
 @pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def no_real_ai(monkeypatch):
+    """.env 의 ANTHROPIC_API_KEY 와 무관하게 테스트는 기본적으로 규칙 분석만 쓴다."""
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+
+
+@pytest.fixture
 def client(repo, decoy_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "decoy_store_dir", str(tmp_path / "decoys_store"))
     app.dependency_overrides[get_log_repo] = lambda: repo
