@@ -143,3 +143,8 @@ curl -X POST localhost:8000/api/decoys -F "file=@fake.xlsx;filename=2026_인사�
 
 - [`agent`](../agent) — Windows 백그라운드 에이전트
 - [`frontend`](../frontend) — 보안 담당자 대시보드
+
+
+## CanaryTrace 인증 추적 서버
+
+ZIP 배포 추적과 인증된 장치 이벤트를 위한 추가 구현은 [canarytrace/README.md](canarytrace/README.md)를 참고하세요. 기존 루트 실행 진입점과 API는 그대로 유지합니다. 새 서비스는 `canarytrace` 디렉터리에서 별도로 실행하며, 프론트엔드는 포함하지 않습니다.
