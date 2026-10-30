@@ -59,7 +59,8 @@ BENIGN = AiVerdict(
 def test_ai_suspicious_verdict_creates_ai_alert_and_slack(client, slack, ai):
     ai.verdict = SUSPICIOUS
 
-    resp = client.post("/api/logs", json=_log(event_type="usb_copy", classification="confidential"))
+    # 기밀(confidential)은 Zero-Access 규칙이 즉시 판정하므로 AI 경로는 일반 등급으로 확인
+    resp = client.post("/api/logs", json=_log(event_type="usb_copy", classification="internal"))
 
     assert resp.status_code == 200
     assert len(store.alerts) == 1
@@ -76,8 +77,8 @@ def test_ai_suspicious_verdict_creates_ai_alert_and_slack(client, slack, ai):
 def test_ai_benign_verdict_overrides_rule_alert(client, slack, ai):
     ai.verdict = BENIGN
 
-    # 규칙만으로는 알림이 나는 로그(기밀 USB 반출)
-    client.post("/api/logs", json=_log(event_type="usb_copy", classification="confidential"))
+    # 규칙만으로는 알림이 나는 로그(일반 파일 USB 반출, score 0.5)
+    client.post("/api/logs", json=_log(event_type="usb_copy", classification="internal"))
 
     assert store.alerts == []
     assert slack == []
