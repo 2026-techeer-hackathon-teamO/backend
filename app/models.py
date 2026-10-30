@@ -65,6 +65,17 @@ class Decoy(BaseModel):
     deployed_host: str | None = None
     triggered: bool = False           # 열려서 비콘이 울렸는지
     trigger_count: int = 0
+    sha256: str | None = None         # 업로드된 디코이 파일 해시 (agent 로그 file_hash와 매칭)
+    size: int | None = None           # 업로드된 디코이 파일 크기(bytes)
+
+
+class AgentDecoy(BaseModel):
+    """agent가 배치할 디코이 목록 항목 (GET /api/agent/decoys)."""
+    id: str
+    token_id: str
+    file_name: str
+    sha256: str
+    size: int
 
 
 class CanaryHit(BaseModel):

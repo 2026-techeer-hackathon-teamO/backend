@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     slack_webhook_url: str = ""
     canary_base_url: str = "http://localhost:8000"
     db_path: str = "dlp.db"
+    decoy_store_dir: str = "decoys_store"
     anthropic_api_key: str = ""
     cors_origins: str = "http://localhost:5173"
 

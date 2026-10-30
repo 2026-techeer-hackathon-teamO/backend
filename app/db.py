@@ -1,7 +1,8 @@
-"""DLP 로그 SQLite 저장소.
+"""DLP 로그 · 디코이 SQLite 저장소.
 
-agent 로그는 재시작해도 남아야 하므로 SQLite 파일(DB_PATH)에 저장합니다.
-알림/디코이 등 나머지 상태는 아직 인메모리 store(app/store.py)를 사용합니다.
+agent 로그와 디코이 레지스트리는 재시작해도 남아야 하므로 SQLite 파일(DB_PATH)에 저장합니다.
+(디코이가 사라지면 PC에 배치된 디코이의 반출을 더 이상 매칭할 수 없음)
+알림/카나리 히트는 아직 인메모리 store(app/store.py)를 사용합니다.
 """
 import json
 import sqlite3
@@ -9,7 +10,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 
 from app.config import settings
-from app.models import EventType, LogRecord
+from app.models import Decoy, EventType, LogRecord
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS logs (
@@ -137,7 +138,103 @@ class LogRepository:
         return [_row_to_record(r) for r in rows], total
 
 
+_DECOY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS decoys (
+    id            TEXT PRIMARY KEY,
+    created_at    TEXT NOT NULL,
+    token_id      TEXT NOT NULL UNIQUE,
+    file_name     TEXT NOT NULL,
+    based_on_hash TEXT,
+    deployed_host TEXT,
+    triggered     INTEGER NOT NULL,
+    trigger_count INTEGER NOT NULL,
+    sha256        TEXT,               -- 소문자 hex. 파일 없이 생성된 디코이는 NULL
+    size          INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_decoys_sha256 ON decoys (sha256);
+"""
+
+_DECOY_COLUMNS = (
+    "id, created_at, token_id, file_name, based_on_hash, deployed_host,"
+    " triggered, trigger_count, sha256, size"
+)
+
+
+def _row_to_decoy(row: sqlite3.Row) -> Decoy:
+    return Decoy(
+        id=row["id"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+        token_id=row["token_id"],
+        file_name=row["file_name"],
+        based_on_hash=row["based_on_hash"],
+        deployed_host=row["deployed_host"],
+        triggered=bool(row["triggered"]),
+        trigger_count=row["trigger_count"],
+        sha256=row["sha256"],
+        size=row["size"],
+    )
+
+
+class DecoyRepository:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        with closing(self._connect()) as conn:
+            conn.executescript(_DECOY_SCHEMA)
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def add(self, decoy: Decoy) -> Decoy:
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                f"INSERT INTO decoys ({_DECOY_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    decoy.id, _ts(decoy.created_at), decoy.token_id, decoy.file_name,
+                    decoy.based_on_hash, decoy.deployed_host, int(decoy.triggered),
+                    decoy.trigger_count, decoy.sha256.lower() if decoy.sha256 else None,
+                    decoy.size,
+                ),
+            )
+        return decoy
+
+    def _one(self, where: str, value: str) -> Decoy | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                f"SELECT {_DECOY_COLUMNS} FROM decoys WHERE {where} = ? LIMIT 1", (value,)
+            ).fetchone()
+        return _row_to_decoy(row) if row else None
+
+    def get(self, decoy_id: str) -> Decoy | None:
+        return self._one("id", decoy_id)
+
+    def find_by_token(self, token_id: str) -> Decoy | None:
+        return self._one("token_id", token_id)
+
+    def find_by_sha256(self, sha256: str) -> Decoy | None:
+        return self._one("sha256", sha256.lower())
+
+    def list(self, *, with_file_only: bool = False) -> list[Decoy]:
+        """최신순."""
+        clause = "WHERE sha256 IS NOT NULL" if with_file_only else ""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                f"SELECT {_DECOY_COLUMNS} FROM decoys {clause} ORDER BY created_at DESC, rowid DESC"
+            ).fetchall()
+        return [_row_to_decoy(r) for r in rows]
+
+    def record_trigger(self, decoy_id: str) -> None:
+        """카나리 비콘이 울렸음을 기록."""
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                "UPDATE decoys SET triggered = 1, trigger_count = trigger_count + 1 WHERE id = ?",
+                (decoy_id,),
+            )
+
+
 _log_repo: LogRepository | None = None
+_decoy_repo: DecoyRepository | None = None
 
 
 def get_log_repo() -> LogRepository:
@@ -146,3 +243,11 @@ def get_log_repo() -> LogRepository:
     if _log_repo is None:
         _log_repo = LogRepository(settings.db_path)
     return _log_repo
+
+
+def get_decoy_repo() -> DecoyRepository:
+    """FastAPI 의존성. 로그와 같은 DB 파일의 decoys 테이블."""
+    global _decoy_repo
+    if _decoy_repo is None:
+        _decoy_repo = DecoyRepository(settings.db_path)
+    return _decoy_repo
