@@ -150,10 +150,8 @@ def test_log_without_decoy_match_uses_normal_analysis(client, slack):
 
     client.post("/api/logs", json=_log(file_hash="0" * 64, classification="internal"))
 
-    # 디코이 알림이 아니라 일반 규칙 분석(외부 채널 반출 규칙)으로 판정된다
-    assert len(store.alerts) == 1
-    assert store.alerts[0].analyzed_by == "rule"
-    assert not store.alerts[0].reason.startswith("디코이")
+    assert store.alerts == []
+    assert slack == []
 
 
 # --- 카나리 비콘: 디코이 레지스트리(DB)에서 토큰 조회 ---

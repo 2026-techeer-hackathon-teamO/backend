@@ -1,11 +1,9 @@
 """로그를 분석해 해킹/유출 의심 패턴을 판단.
 
-[Zero-Access 기밀 보안 정책]
-기밀 파일(confidential)은 애초에 열람·복사·이동·전송 등 모든 접근이 불가한 자산으로 가정합니다.
-따라서 기밀 파일에 대한 임의의 접근이 포착되면 단 1건이라도 즉시 100% 이상 탐지(HIGH 위험도)로 판정합니다.
-그 외 일반/내부 파일은 반출성 이벤트 및 AI 맥락 분석을 거쳐 판정합니다.
+1) 규칙 기반 스코어링을 먼저 돌리고,
+2) 반출성 이벤트이거나 규칙에 신호가 잡히면 해킹 패턴 AI(Claude)가 같은 PC의 최근 로그 맥락으로 최종 판정.
+   AI를 쓸 수 없으면(키 없음/오류/거절) 규칙 결과로 판정합니다.
 """
-
 from app.models import Alert, EventType, LogRecord, Severity
 from app.services import ai_analyzer
 
@@ -22,30 +20,25 @@ def _rule_score(log: LogRecord, recent: list[LogRecord]) -> tuple[float, list[st
     score = 0.0
     reasons: list[str] = []
 
-    is_confidential = (log.classification or "").lower() == "confidential"
-
-    # [핵심] Zero-Access 원칙: 모든 접근이 불가한 기밀 파일에 대한 어떠한 접근이든 즉시 이상 탐지
-    if is_confidential:
-        score = 1.0
-        target = log.file_name or "기밀 파일"
-        reasons.append(f"접근 불가 기밀 파일({target})에 대한 {log.event_type.value} 무단 접근 포착 (Zero-Access 정책 위반)")
-        return score, reasons
-
-    # 규칙 1: 일반/내부 파일의 외부 채널(메일/USB) 반출 시도
+    # 규칙 1: 기밀이 외부 채널(메일/USB)로 나감
     if log.event_type in (EventType.EMAIL_SEND, EventType.USB_COPY):
-        score += 0.5
-        reasons.append(f"외부 채널로의 파일 {log.event_type.value} 시도")
+        if (log.classification or "").lower() == "confidential":
+            score += 0.6
+            reasons.append(f"기밀 파일의 {log.event_type.value} 시도")
 
-    # 규칙 2: 같은 호스트에서 단시간 다수 활동
-    same_host_events = [r for r in recent if r.host == log.host]
-    if len(same_host_events) >= 10:
+    # 규칙 2: 같은 호스트에서 단시간 다수 기밀 접근 (대량 반출 징후)
+    same_host_confidential = [
+        r for r in recent
+        if r.host == log.host and (r.classification or "").lower() == "confidential"
+    ]
+    if len(same_host_confidential) >= 5:
         score += 0.3
-        reasons.append(f"{log.host}에서 단시간 다수 이벤트({len(same_host_events)}건)")
+        reasons.append(f"{log.host}에서 기밀 파일 다수 접근({len(same_host_confidential)}건)")
 
     # 규칙 3: 차단된 이벤트는 그 자체로 주의 신호
     if log.blocked:
-        score += 0.3
-        reasons.append("보안 정책에 의해 차단된 시도")
+        score += 0.2
+        reasons.append("정책에 의해 차단된 시도")
 
     return score, reasons
 
@@ -81,11 +74,6 @@ async def analyze(log: LogRecord, recent: list[LogRecord]) -> Alert | None:
     """단일 로그 + 최근 로그 맥락으로 의심 여부 판정. 의심 없으면 None."""
     score, reasons = _rule_score(log, recent)
 
-    # 기밀 파일의 Zero-Access 위반은 규칙 단계에서 즉시 판정 완료
-    if score >= 1.0:
-        return _rule_alert(log, score, reasons)
-
-    # 그 외 이벤트에 대해 AI 분석 수행
     if ai_analyzer.ai_enabled() and (score > 0 or log.event_type in _EXFIL_EVENTS):
         history = [r for r in recent if r.host == log.host and r.id != log.id][-_AI_HISTORY:]
         verdict = await ai_analyzer.judge(log, history)

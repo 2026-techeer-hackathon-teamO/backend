@@ -1,29 +1,8 @@
-"""Tests for the LLM-driven Deception Engine & Zero-Access Confidential Policy."""
+"""Tests for the LLM-driven Deception Engine."""
 
 from app.db import DecoyRepository
-from app.models import EventType, LogRecord, Severity
-from app.services.analyzer import analyze
 from app.services.decoy import synthesize_transparent_decoy, synthesize_decoy_text
 from app.store import store
-
-
-def test_zero_access_confidential_policy_instant_high_alert():
-    """모든 접근이 불가한 기밀 파일은 단순 열람(file_access)만 발생해도 즉시 HIGH 알림이어야 한다."""
-    record = LogRecord(
-        host="SEC-PC-01",
-        user="attacker",
-        event_type=EventType.FILE_ACCESS,
-        file_name="project_alpha_design.txt",
-        classification="confidential",
-    )
-    import asyncio
-    alert = asyncio.run(analyze(record, []))
-
-    assert alert is not None
-    assert alert.severity == Severity.HIGH
-    assert alert.score == 1.0
-    assert "Zero-Access" in alert.reason
-    assert "project_alpha_design.txt" in alert.reason
 
 
 def test_llm_decoy_synthesis_content_and_canary_injection():

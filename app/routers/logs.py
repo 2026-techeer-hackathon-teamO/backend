@@ -37,7 +37,7 @@ async def _analyze_and_alert(record: LogRecord, repo: LogRepository) -> None:
     if alert is None:
         return
     store.add_alert(alert)
-    judge = "Zero-Access 규칙 판정" if alert.analyzed_by == "rule" else "해킹 패턴 AI 판단"
+    judge = "해킹 패턴 AI 판단" if alert.analyzed_by == "ai" else "규칙 탐지"
     alert.notified = await notify_slack(
         f":rotating_light: 유출 의심 ({alert.severity.value}, score={alert.score}) · {judge}\n"
         f"host={alert.host}, user={record.user}\n근거: {alert.reason}"
