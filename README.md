@@ -19,16 +19,73 @@
 
 ## 실행
 
+### 1. 설치
+
+Python 3.11 이상이 필요합니다.
+
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env            # SLACK_WEBHOOK_URL 등 채우기
+pip install -r requirements.txt                     # 의존성이 바뀌면(git pull 후 등) 다시 실행
+```
+
+### 2. 환경 변수 (`.env`)
+
+```bash
+cp .env.example .env
+```
+
+| 변수 | 필수 | 설명 |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | 선택 | 해킹 패턴 AI(Claude) 키. **비우면 규칙 기반 분석만** 동작 |
+| `AI_MODEL` | 선택 | 판단에 쓸 Claude 모델 (기본 `claude-opus-5-5`) |
+| `SLACK_WEBHOOK_URL` | 선택 | 보안 담당자 알림용 Slack Incoming Webhook. **비우면 서버 콘솔에 출력** |
+| `CANARY_BASE_URL` | 선택 | 디코이 파일에 심을 카나리 비콘 베이스 URL (기본 `http://localhost:8000`) |
+| `DB_PATH` | 선택 | 로그·디코이 SQLite 파일 (기본 `dlp.db`) |
+| `DECOY_STORE_DIR` | 선택 | 업로드된 디코이 파일 폴더 (기본 `decoys_store`) |
+| `CORS_ORIGINS` | 선택 | 프론트 개발 서버 주소, 쉼표로 여러 개 (기본 `http://localhost:5173`) |
+
+아무것도 채우지 않아도 서버는 뜹니다. 이 경우 AI 대신 규칙으로 판단하고, 알림은 Slack 대신 콘솔에 찍힙니다.
+
+### 3. 서버 실행
+
+```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- API 문서: http://localhost:8000/docs
+- API 문서(Swagger): http://localhost:8000/docs
 - 헬스체크: http://localhost:8000/health
+
+### 4. 해킹 패턴 AI 동작 확인
+
+기밀 파일을 USB로 복사하는 로그를 보낸 뒤 알림을 조회합니다. 분석은 백그라운드에서 돌기 때문에 AI 판단은 몇 초 걸립니다.
+
+```bash
+curl -X POST localhost:8000/api/logs -H 'Content-Type: application/json' \
+  -d '{"host":"PC-01","user":"kim","event_type":"usb_copy","file_name":"2026_인사평가.xlsx","classification":"confidential","channel":"usb:E:"}'
+
+sleep 5
+curl localhost:8000/api/alerts
+```
+
+응답의 `analyzed_by`로 누가 판단했는지 확인합니다.
+
+| `analyzed_by` | 의미 |
+|---|---|
+| `ai` | Claude가 판단함 (`ANTHROPIC_API_KEY` 설정됨) |
+| `rule` | 규칙으로 판단함 (키 없음, 또는 AI 호출 실패 → 서버 콘솔에 `[ai_analyzer] ...` 로그) |
+| `decoy` | 디코이 파일 해시와 일치 |
+
+저장 없이 판단 결과만 보고 싶으면 `POST /api/analyze`에 같은 본문을 보내면 됩니다 (바로 응답, 알림·Slack 없음).
+
+### 5. 테스트
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+테스트는 실제 Claude API를 호출하지 않습니다.
 
 ## 상태 저장
 
@@ -80,13 +137,6 @@ agent    ── POST /api/logs {file_hash} ────────▶ 디코이
 ```bash
 # 테스트용 디코이 업로드
 curl -X POST localhost:8000/api/decoys -F "file=@fake.xlsx;filename=2026_인사평가_기밀.xlsx" -F based_on_hash=<원본해시>
-```
-
-## 테스트
-
-```bash
-pip install -r requirements-dev.txt
-pytest
 ```
 
 ## 관련 레포
