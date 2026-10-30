@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     db_path: str = "dlp.db"
     decoy_store_dir: str = "decoys_store"
     anthropic_api_key: str = ""
+    gemini_api_key: str = ""
     ai_model: str = "claude-opus-5-5"
     cors_origins: str = "http://localhost:5173"
 

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 
 from app.db import DecoyRepository, get_decoy_repo
 from app.models import CanaryHit, Decoy
-from app.services.decoy import build_decoy, save_decoy_file
+from app.services.decoy import build_decoy, save_decoy_file, synthesize_transparent_decoy
 from app.services.notifier import notify_slack
 from app.store import store
 
@@ -33,10 +33,30 @@ async def upload_decoy(
 async def generate_decoy(
     file_name: str,
     based_on_hash: str | None = None,
+    synthesize: bool = False,
     repo: DecoyRepository = Depends(get_decoy_repo),
 ) -> dict:
-    """유사 기밀 디코이 + 카나리토큰 생성. canary_url을 파일에 심어 배포."""
-    decoy, canary_url = build_decoy(file_name, based_on_hash)
+    """유사 기밀 디코이 + 카나리토큰 생성.
+
+    synthesize=True 지정 시 LLM을 호출하여 공격자가 실제 기밀로 믿을 수 있는
+    가짜 기밀 문서 내용과 카나리 비콘을 즉시 파일로 합성·저장합니다.
+    """
+    if synthesize:
+        decoy, canary_url = synthesize_transparent_decoy(file_name, based_on_hash)
+    else:
+        decoy, canary_url = build_decoy(file_name, based_on_hash)
+    repo.add(decoy)
+    return {"decoy": decoy, "canary_url": canary_url}
+
+
+@router.post("/decoys/synthesize")
+async def synthesize_decoy_endpoint(
+    file_name: str,
+    based_on_hash: str | None = None,
+    repo: DecoyRepository = Depends(get_decoy_repo),
+) -> dict:
+    """LLM 기반 투명 대체 디코이 + 카나리토큰 생성 및 파일 자동 저장."""
+    decoy, canary_url = synthesize_transparent_decoy(file_name, based_on_hash)
     repo.add(decoy)
     return {"decoy": decoy, "canary_url": canary_url}
 

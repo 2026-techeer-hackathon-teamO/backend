@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from app.db import DecoyRepository, LogRepository, get_decoy_repo, get_log_repo
 from app.models import Alert, Decoy, EventType, LogIn, LogRecord, Severity
 from app.services.analyzer import analyze
+from app.services.decoy import synthesize_transparent_decoy
 from app.services.notifier import notify_slack
 from app.store import store
 
@@ -36,11 +37,20 @@ async def _analyze_and_alert(record: LogRecord, repo: LogRepository) -> None:
     if alert is None:
         return
     store.add_alert(alert)
-    judge = "해킹 패턴 AI 판단" if alert.analyzed_by == "ai" else "규칙 탐지"
+    judge = "Zero-Access 규칙 판정" if alert.analyzed_by == "rule" else "해킹 패턴 AI 판단"
     alert.notified = await notify_slack(
         f":rotating_light: 유출 의심 ({alert.severity.value}, score={alert.score}) · {judge}\n"
         f"host={alert.host}, user={record.user}\n근거: {alert.reason}"
     )
+
+
+def _synthesize_decoy_replacement(file_name: str, file_hash: str | None, decoys: DecoyRepository) -> None:
+    """기밀 파일 접근 시 공격자가 접근했다고 느끼도록 동일 맥락의 투명 대체 디코이를 자동 합성."""
+    try:
+        decoy, _ = synthesize_transparent_decoy(file_name, based_on_hash=file_hash)
+        decoys.add(decoy)
+    except Exception:
+        pass
 
 
 @router.post("", response_model=LogRecord)
@@ -52,7 +62,7 @@ async def ingest_log(
 ) -> LogRecord:
     record = repo.add(LogRecord(**payload.model_dump()))
 
-    # agent가 몰래 배치한 디코이를 건드렸으면 규칙 분석 없이 바로 알림
+    # 1. agent가 몰래 배치한 디코이를 건드렸으면 규칙 분석 없이 즉시 최고 위험 알림
     decoy = decoys.find_by_sha256(record.file_hash) if record.file_hash else None
     if decoy is not None:
         alert = store.add_alert(_decoy_alert(record, decoy))
@@ -63,6 +73,12 @@ async def ingest_log(
         )
         return record
 
+    # 2. 기밀 파일 접근 시: 공격자 유인용 투명 대체 디코이 자동 합성 백그라운드 등록
+    is_confidential = (record.classification or "").lower() == "confidential"
+    if is_confidential and record.file_name:
+        background.add_task(_synthesize_decoy_replacement, record.file_name, record.file_hash, decoys)
+
+    # 3. 이상 탐지 및 Slack 알림 트리거
     background.add_task(_analyze_and_alert, record, repo)
     return record
 
