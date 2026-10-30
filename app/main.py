@@ -15,6 +15,7 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],  # GET /api/logs 페이지네이션 전체 건수
 )
 
 app.include_router(logs.router)
