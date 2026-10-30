@@ -1,14 +1,22 @@
 """로그를 분석해 해킹/유출 의심 패턴을 판단.
 
-현재는 간단한 규칙 기반 스코어링 스텁입니다.
-TODO: ANTHROPIC_API_KEY 가 있으면 LLM으로 로그 시퀀스를 분석해
-       (대량 반출, 비정상 시간대, 권한 외 접근 등) 정교하게 판단하도록 교체.
+1) 규칙 기반 스코어링을 먼저 돌리고,
+2) 반출성 이벤트이거나 규칙에 신호가 잡히면 해킹 패턴 AI(Claude)가 같은 PC의 최근 로그 맥락으로 최종 판정.
+   AI를 쓸 수 없으면(키 없음/오류/거절) 규칙 결과로 판정합니다.
 """
 from app.models import Alert, EventType, LogRecord, Severity
+from app.services import ai_analyzer
+
+# 이 이벤트들은 규칙 신호가 없어도 AI가 맥락을 본다
+_EXFIL_EVENTS = (EventType.EMAIL_SEND, EventType.USB_COPY, EventType.BLOCKED)
+
+# AI 판정이 suspicious여도 이 의심도 미만이면 알리지 않는다 (오탐 억제)
+_AI_ALERT_THRESHOLD = 0.5
+
+_AI_HISTORY = 30
 
 
-def analyze(log: LogRecord, recent: list[LogRecord]) -> Alert | None:
-    """단일 로그 + 최근 로그 맥락으로 의심 여부 판정. 의심 없으면 None."""
+def _rule_score(log: LogRecord, recent: list[LogRecord]) -> tuple[float, list[str]]:
     score = 0.0
     reasons: list[str] = []
 
@@ -32,16 +40,44 @@ def analyze(log: LogRecord, recent: list[LogRecord]) -> Alert | None:
         score += 0.2
         reasons.append("정책에 의해 차단된 시도")
 
-    # TODO: LLM 기반 시퀀스 분석으로 score/reason 보강
+    return score, reasons
 
+
+def _rule_alert(log: LogRecord, score: float, reasons: list[str]) -> Alert | None:
     if score < 0.5:
         return None
-
-    severity = Severity.HIGH if score >= 0.8 else Severity.MEDIUM
     return Alert(
-        severity=severity,
+        severity=Severity.HIGH if score >= 0.8 else Severity.MEDIUM,
         reason="; ".join(reasons),
         score=round(min(score, 1.0), 2),
         related_log_ids=[log.id],
         host=log.host,
+        analyzed_by="rule",
     )
+
+
+def _ai_alert(log: LogRecord, verdict: ai_analyzer.AiVerdict) -> Alert | None:
+    if not verdict.suspicious or verdict.score < _AI_ALERT_THRESHOLD:
+        return None
+    patterns = f" [{', '.join(verdict.patterns)}]" if verdict.patterns else ""
+    return Alert(
+        severity=verdict.severity,
+        reason=f"{verdict.reason}{patterns}",
+        score=round(verdict.score, 2),
+        related_log_ids=[log.id],
+        host=log.host,
+        analyzed_by="ai",
+    )
+
+
+async def analyze(log: LogRecord, recent: list[LogRecord]) -> Alert | None:
+    """단일 로그 + 최근 로그 맥락으로 의심 여부 판정. 의심 없으면 None."""
+    score, reasons = _rule_score(log, recent)
+
+    if ai_analyzer.ai_enabled() and (score > 0 or log.event_type in _EXFIL_EVENTS):
+        history = [r for r in recent if r.host == log.host and r.id != log.id][-_AI_HISTORY:]
+        verdict = await ai_analyzer.judge(log, history)
+        if verdict is not None:
+            return _ai_alert(log, verdict)
+
+    return _rule_alert(log, score, reasons)

@@ -18,4 +18,4 @@ async def list_alerts() -> list[Alert]:
 async def analyze_once(payload: LogIn, repo: LogRepository = Depends(get_log_repo)) -> Alert | None:
     """임의 로그 하나를 분석만 해보는 디버그/시연용 엔드포인트 (저장 안 함)."""
     record = LogRecord(**payload.model_dump())
-    return analyze(record, repo.recent(50))
+    return await analyze(record, repo.recent(50))

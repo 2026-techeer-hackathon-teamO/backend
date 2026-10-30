@@ -5,3 +5,4 @@ pydantic>=2.11
 pydantic-settings>=2.7
 httpx>=0.28
 python-multipart>=0.0.17
+anthropic>=2.3
