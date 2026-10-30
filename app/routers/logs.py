@@ -1,10 +1,10 @@
-"""agent가 보낸 DLP 로그 수집 + 즉시 AI 분석."""
+"""agent가 보낸 DLP 로그 수집 + 디코이 반출 감지 + 즉시 AI 분석."""
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from app.db import LogRepository, get_log_repo
-from app.models import EventType, LogIn, LogRecord
+from app.db import DecoyRepository, LogRepository, get_decoy_repo, get_log_repo
+from app.models import Alert, Decoy, EventType, LogIn, LogRecord, Severity
 from app.services.analyzer import analyze
 from app.services.notifier import notify_slack
 from app.store import store
@@ -12,9 +12,38 @@ from app.store import store
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
 
+def _decoy_alert(record: LogRecord, decoy: Decoy) -> Alert:
+    """정상 업무에서 건드릴 일이 없는 미끼이므로 등급과 무관하게 최고 위험으로 본다."""
+    return Alert(
+        severity=Severity.HIGH,
+        reason=(
+            f"디코이 파일 '{decoy.file_name}' {record.event_type.value} 감지"
+            f" (user={record.user}, channel={record.channel})"
+        ),
+        score=1.0,
+        related_log_ids=[record.id],
+        host=record.host,
+    )
+
+
 @router.post("", response_model=LogRecord)
-async def ingest_log(payload: LogIn, repo: LogRepository = Depends(get_log_repo)) -> LogRecord:
+async def ingest_log(
+    payload: LogIn,
+    repo: LogRepository = Depends(get_log_repo),
+    decoys: DecoyRepository = Depends(get_decoy_repo),
+) -> LogRecord:
     record = repo.add(LogRecord(**payload.model_dump()))
+
+    # agent가 몰래 배치한 디코이를 건드렸으면 규칙 분석 없이 바로 알림
+    decoy = decoys.find_by_sha256(record.file_hash) if record.file_hash else None
+    if decoy is not None:
+        alert = store.add_alert(_decoy_alert(record, decoy))
+        alert.notified = await notify_slack(
+            f":rotating_light: 디코이 반출/접근 감지 ({record.event_type.value})\n"
+            f"파일: {decoy.file_name}\nhost={record.host}, user={record.user},"
+            f" channel={record.channel}"
+        )
+        return record
 
     # 최근 로그 맥락과 함께 분석 → 의심되면 알림 적재 + Slack
     recent = repo.recent(50)
